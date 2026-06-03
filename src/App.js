@@ -707,12 +707,9 @@ function Jobs({ clients, jobs, setJobs, reports, setReports, userRole }) {
       </div>
       {modal && <JobModal job={modal === "new" ? null : modal} clients={clients} loading={loading} onSave={save} onClose={() => setModal(null)} />}
      {viuModal && <ViuModal job={viuModal} clients={clients} onSave={async (r) => {
-        const { data } = await supabase.from("reports").insert(r).select().single();
-        if (data) {
-          setReports(p => [...p, data]);
-          const jobReports = await supabase.from("reports").select("*").order("date", { ascending: false });
-          if (jobReports.data) setReports(jobReports.data);
-        }
+        const { data, error } = await supabase.from("reports").insert(r).select().single();
+        if (error) { alert("Eroare: " + error.message); return; }
+        if (data) setReports(p => [...p, data]);
         setViuModal(null);
       }} onClose={() => setViuModal(null)} />}
     </div>
