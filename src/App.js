@@ -707,7 +707,12 @@ function Jobs({ clients, jobs, setJobs, reports, setReports, userRole }) {
       </div>
       {modal && <JobModal job={modal === "new" ? null : modal} clients={clients} loading={loading} onSave={save} onClose={() => setModal(null)} />}
      {viuModal && <ViuModal job={viuModal} clients={clients} onSave={async (r) => {
-        const { data, error } = await supabase.from("reports").insert(r).select().single();
+        const reportToSave = {
+          ...r,
+          checklist: JSON.stringify(r.checklist || {}),
+          checklist_obs: JSON.stringify(r.checklist_obs || {}),
+        };
+        const { data, error } = await supabase.from("reports").insert(reportToSave).select().single();
         if (error) { alert("Eroare: " + error.message); return; }
         if (data) setReports(p => [...p, data]);
         setViuModal(null);
