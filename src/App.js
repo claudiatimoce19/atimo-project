@@ -737,8 +737,9 @@ function Jobs({ clients, jobs, setJobs, reports, setReports, userRole }) {
           installation_location: r.installation_location,
           test_result: r.test_result,
         };
+        console.log("Trimit raport:", JSON.stringify(reportToSave));
         const { data, error } = await supabase.from("reports").insert(reportToSave).select().single();
-        if (error) { alert("Eroare: " + error.message); return; }
+        if (error) { alert("Eroare completa: " + JSON.stringify(error)); return; }
         if (data) setReports(p => [...p, data]);
         setViuModal(null);
       }} onClose={() => setViuModal(null)} />}
