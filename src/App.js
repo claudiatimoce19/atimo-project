@@ -708,9 +708,34 @@ function Jobs({ clients, jobs, setJobs, reports, setReports, userRole }) {
       {modal && <JobModal job={modal === "new" ? null : modal} clients={clients} loading={loading} onSave={save} onClose={() => setModal(null)} />}
      {viuModal && <ViuModal job={viuModal} clients={clients} onSave={async (r) => {
         const reportToSave = {
-          ...r,
-          checklist: JSON.stringify(r.checklist || {}),
-          checklist_obs: JSON.stringify(r.checklist_obs || {}),
+          job_id: r.job_id,
+          client_id: r.client_id,
+          type: r.type,
+          number: r.number,
+          date: r.date,
+          consumption_address: r.consumption_address,
+          contract_number: r.contract_number,
+          last_verification_date: r.last_verification_date || null,
+          due_date: r.due_date || null,
+          inspection_type: r.inspection_type,
+          installation_type: r.installation_type,
+          checklist: r.checklist || {},
+          checklist_obs: r.checklist_obs || {},
+          defects: r.defects,
+          actions: r.actions,
+          conclusion: r.conclusion,
+          technical_conditions: r.technical_conditions,
+          client_sig: null,
+          technician_sig: null,
+          meter_protocol_number: r.meter_protocol_number,
+          meter_protocol_date: r.meter_protocol_date || null,
+          revision_reason: r.revision_reason,
+          pressure_resistance: r.pressure_resistance || null,
+          pressure_tightness: r.pressure_tightness || null,
+          pressure_regime: r.pressure_regime || null,
+          installation_material: r.installation_material,
+          installation_location: r.installation_location,
+          test_result: r.test_result,
         };
         const { data, error } = await supabase.from("reports").insert(reportToSave).select().single();
         if (error) { alert("Eroare: " + error.message); return; }
