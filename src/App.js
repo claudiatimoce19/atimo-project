@@ -1200,7 +1200,7 @@ export default function App() {
 
         <div className="main">
           <div className="topbar">
-            <button className="btn-icon" onClick={() => setSidebarOpen(!sidebarOpen)} style={{ display: "none", marginRight: 4 }} id="hamburger"><Ic n="menu" /></button>
+            <button className="btn-icon" onClick={() => setSidebarOpen(!sidebarOpen)} style={{ marginRight: 4 }} id="hamburger"><Ic n="menu" /></button>
             <div className="topbar-title">{titles[page]}</div>
             {expiring > 0 && (
               <button className="btn btn-sm" style={{ background: COLORS.warningLight, color: COLORS.warning, border: "none" }} onClick={() => setPage("reports")}>
