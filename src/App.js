@@ -1171,16 +1171,56 @@ const CONTRACT_SERVICES = [
   "Montaj Termostat","Montaj Filtru Magnetic","Taxa Urgenta","Tarif Deplasare",
 ];
 
-function Contracts({ clients, contracts, setContracts }) {
+function Contracts({ clients, contracts, setContracts, reports, setReports }) {
   const [modal, setModal] = useState(false);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
+  // After contract saved, if ViU or RiU selected, open report form pre-filled
+  const [viuFromContract, setViuFromContract] = useState(null); // { contract, client }
+
   const save = async (form) => {
     setLoading(true);
     const { data } = await supabase.from("contracts").insert(form).select().single();
-    if (data) setContracts(p => [...p, data]);
+    if (data) {
+      setContracts(p => [...p, data]);
+      // Check if ViU or RiU is selected
+      const hasViU = (form.services||[]).some(s => s.checked && s.label.includes("ViU"));
+      const hasRiU = (form.services||[]).some(s => s.checked && s.label.includes("RiU"));
+      const client = clients.find(c => c.id === form.client_id);
+      if (hasViU || hasRiU) {
+        setViuFromContract({
+          contract: data,
+          client,
+          type: hasRiU ? "RiU" : "ViU",
+        });
+      }
+    }
     setLoading(false); setModal(false);
   };
+
+  const saveReport = async (r) => {
+    const reportToSave = {
+      job_id: null, client_id: r.client_id, type: r.type, number: r.number, date: r.date,
+      consumption_address: r.consumption_address, contract_number: r.contract_number,
+      last_verification_date: r.last_verification_date || null, due_date: r.due_date || null,
+      inspection_type: r.inspection_type, installation_type: r.installation_type,
+      checklist: r.checklist || {}, checklist_obs: r.checklist_obs || {},
+      defects: r.defects, actions: r.actions, conclusion: r.conclusion,
+      technical_conditions: r.technical_conditions,
+      client_sig: r.client_sig || null, technician_sig: r.technician_sig || null,
+      meter_protocol_number: r.meter_protocol_number, meter_protocol_date: r.meter_protocol_date || null,
+      revision_reason: r.revision_reason,
+      pressure_resistance: r.pressure_resistance || null, pressure_tightness: r.pressure_tightness || null,
+      pressure_regime: r.pressure_regime || null,
+      installation_material: r.installation_material, installation_location: r.installation_location,
+      test_result: r.test_result,
+    };
+    const { data, error } = await supabase.from("reports").insert(reportToSave).select().single();
+    if (error) { alert("Eroare raport: " + error.message); return; }
+    if (data) setReports(p => [...p, data]);
+    setViuFromContract(null);
+  };
+
   return (
     <div>
       <div className="filter-bar">
@@ -1210,6 +1250,18 @@ function Contracts({ clients, contracts, setContracts }) {
         </div>
       </div>
       {modal && <ContractModal clients={clients} loading={loading} onSave={save} onClose={()=>setModal(false)} />}
+
+      {/* ViU/RiU form pre-filled from contract */}
+      {viuFromContract && (
+        <ViuModalFromContract
+          contract={viuFromContract.contract}
+          client={viuFromContract.client}
+          type={viuFromContract.type}
+          onSave={saveReport}
+          onClose={()=>setViuFromContract(null)}
+        />
+      )}
+
       {preview && (
         <div className="modal-bg">
           <div className="modal modal-lg" style={{maxWidth:900}}>
@@ -1276,6 +1328,173 @@ function ContractModal({ clients, loading, onSave, onClose }) {
           <button className="btn btn-ghost" onClick={onClose}>Anulare</button>
           <button className="btn btn-primary" disabled={loading} onClick={()=>{if(!f.client_id||!f.total_price)return alert("Selectați clientul și introduceți valoarea!");onSave(f);}}>
             {loading?<span className="spinner"/>:<><Ic n="check" s={14}/> Salvare contract</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── VIU MODAL FROM CONTRACT ─────────────────────────────────────────────────
+// Pre-fills data from contract: client, address, contract number, date, signature
+
+function ViuModalFromContract({ contract, client, type, onSave, onClose }) {
+  const isRiu = type === "RiU";
+  const ops = isRiu ? RIU_OPS : VIU_OPS;
+  const [tab, setTab] = useState("verificare");
+  const [preview, setPreview] = useState(false);
+  const [f, setF] = useState({
+    type,
+    number: `${type}-${Date.now().toString().slice(-6)}`,
+    client_id: client?.id || "",
+    date: contract.date || today(),
+    consumption_address: client?.address || "",
+    contract_number: contract.number || "",
+    last_verification_date: "",
+    due_date: addDays(contract.date || today(), isRiu ? 3650 : 730),
+    inspection_type: "Periodică",
+    installation_type: "Individuală",
+    checklist: {}, checklist_obs: {},
+    defects: "", actions: "", conclusion: "ADMIS",
+    technical_conditions: "Corespunzătoare",
+    // Semnătura clientului copiată automat din contract
+    client_sig: contract.client_sig || null,
+    technician_sig: contract.technician_sig || null,
+    meter_protocol_number: "", meter_protocol_date: "", revision_reason: "",
+    pressure_resistance: "", pressure_tightness: "", pressure_regime: "",
+    installation_material: "OL", installation_location: "Suprateran", test_result: "Admis",
+  });
+  const s = (k,v) => setF(p=>({...p,[k]:v}));
+
+  if (preview) return (
+    <div className="modal-bg">
+      <div className="modal modal-lg" style={{maxWidth:900}}>
+        <div className="modal-hdr">
+          <Ic n="filetxt"/><div className="modal-title">Previzualizare {f.type} — {f.number}</div>
+          <button className="btn btn-sm btn-ghost no-print" style={{marginRight:4}} onClick={()=>window.print()}><Ic n="print" s={14}/> Tipărire</button>
+          <button className="btn-icon no-print" onClick={()=>setPreview(false)}><Ic n="x"/></button>
+        </div>
+        <div className="modal-body" style={{padding:0}}><ViuPDF r={f} client={client} /></div>
+        <div className="modal-foot no-print">
+          <button className="btn btn-ghost" onClick={()=>setPreview(false)}>Înapoi</button>
+          <button className="btn btn-primary" onClick={()=>onSave(f)}><Ic n="check" s={14}/> Salvare și finalizare</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="modal-bg">
+      <div className="modal modal-lg" style={{maxWidth:900}}>
+        <div className="modal-hdr">
+          <Ic n="filetxt"/>
+          <div className="modal-title">
+            Raport {type} — {client?.last_name} {client?.first_name}
+            <span style={{fontSize:12,color:COLORS.gray400,marginLeft:8,fontWeight:400}}>generat din contractul {contract.number}</span>
+          </div>
+          <button className="btn-icon" onClick={onClose}><Ic n="x"/></button>
+        </div>
+
+        {/* Info banner */}
+        <div style={{padding:"10px 24px",background:COLORS.primaryLight,borderBottom:`1px solid ${COLORS.gray100}`,fontSize:13,color:COLORS.primary,display:"flex",alignItems:"center",gap:8}}>
+          <Ic n="check" s={15}/>
+          Datele clientului, nr. contractului și semnătura au fost preluate automat din contract.
+          {contract.client_sig && <span style={{color:COLORS.success}}>✓ Semnătură client inclusă</span>}
+        </div>
+
+        <div className="modal-body">
+          <div className="tabs">
+            {["verificare", isRiu?"presiune":null, "concluzie", "semnaturi"].filter(Boolean).map(t=>(
+              <button key={t} className={`tab ${tab===t?"active":""}`} onClick={()=>setTab(t)}>
+                {t==="verificare"?"Operații verificare":t==="presiune"?"Probe presiune":t==="concluzie"?"Concluzie":"Semnături"}
+              </button>
+            ))}
+          </div>
+
+          {/* Date precompletate - vizualizare */}
+          <div style={{background:COLORS.gray50,borderRadius:8,padding:"12px 16px",marginBottom:16,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:13}}>
+            <div><span style={{color:COLORS.gray400}}>Client: </span><strong>{client?.last_name} {client?.first_name}</strong></div>
+            <div><span style={{color:COLORS.gray400}}>Nr. contract: </span><strong>{contract.number}</strong></div>
+            <div><span style={{color:COLORS.gray400}}>Adresă: </span><strong>{client?.address}, {client?.city}</strong></div>
+            <div><span style={{color:COLORS.gray400}}>Data: </span><strong>{fmtApp(contract.date)}</strong></div>
+            <div><span style={{color:COLORS.gray400}}>Scadent: </span>
+              <input type="date" value={f.due_date} onChange={e=>s("due_date",e.target.value)} style={{padding:"2px 6px",fontSize:12,width:"auto"}} />
+            </div>
+            <div><span style={{color:COLORS.gray400}}>Ultima verificare: </span>
+              <input type="date" value={f.last_verification_date} onChange={e=>s("last_verification_date",e.target.value)} style={{padding:"2px 6px",fontSize:12,width:"auto"}} />
+            </div>
+            <div><span style={{color:COLORS.gray400}}>Tip instalație: </span>
+              <select value={f.installation_type} onChange={e=>s("installation_type",e.target.value)} style={{padding:"2px 6px",fontSize:12,width:"auto"}}>
+                <option>Individuală</option><option>Comună</option>
+              </select>
+            </div>
+            {isRiu && <div><span style={{color:COLORS.gray400}}>Protocol contor: </span>
+              <input value={f.meter_protocol_number} onChange={e=>s("meter_protocol_number",e.target.value)} style={{padding:"2px 6px",fontSize:12,width:"auto"}} placeholder="Nr. protocol" />
+            </div>}
+          </div>
+
+          {tab==="verificare" && <div>
+            <p style={{fontSize:13,color:COLORS.gray400,marginBottom:14}}>Selectați rezultatul fiecărei operații:</p>
+            {ops.map((op,i) => {
+              const id = `v${i+1}`;
+              return (
+                <div key={id} className="checklist-row">
+                  <div className="checklist-text" style={{fontSize:13}}>{i+1}. {op}</div>
+                  <div className="check-opts">
+                    {["DA","NU","N/A"].map(opt=>(
+                      <label key={opt} className="check-opt">
+                        <input type="radio" name={`ctr_${id}`} value={opt} checked={f.checklist[id]===opt} onChange={()=>setF(p=>({...p,checklist:{...p.checklist,[id]:opt}}))} />
+                        <span>{opt}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <input style={{width:150,fontSize:12}} placeholder="Obs." value={f.checklist_obs[id]||""} onChange={e=>setF(p=>({...p,checklist_obs:{...p.checklist_obs,[id]:e.target.value}}))} />
+                </div>
+              );
+            })}
+          </div>}
+
+          {tab==="presiune" && isRiu && <div className="fgrid">
+            <div className="fgroup"><label>Material instalație</label><select value={f.installation_material} onChange={e=>s("installation_material",e.target.value)}><option>OL</option><option>PE100</option><option>PE80</option></select></div>
+            <div className="fgroup"><label>Amplasament</label><select value={f.installation_location} onChange={e=>s("installation_location",e.target.value)}><option>Suprateran</option><option>Subteran</option></select></div>
+            <div className="fgroup"><label>Motiv revizie</label><input value={f.revision_reason} onChange={e=>s("revision_reason",e.target.value)} /></div>
+            <div className="fgroup"><label>Presiune rezistență (bar)</label><input type="number" step="0.1" value={f.pressure_resistance} onChange={e=>s("pressure_resistance",e.target.value)} /></div>
+            <div className="fgroup"><label>Presiune etanșeitate (bar)</label><input type="number" step="0.1" value={f.pressure_tightness} onChange={e=>s("pressure_tightness",e.target.value)} /></div>
+            <div className="fgroup"><label>Rezultat test</label><select value={f.test_result} onChange={e=>s("test_result",e.target.value)}><option>Admis</option><option>Respins</option></select></div>
+          </div>}
+
+          {tab==="concluzie" && <div className="fgrid">
+            <div className="fgroup spanfull"><label>Concluzie finală</label><select value={f.conclusion} onChange={e=>s("conclusion",e.target.value)}><option>ADMIS</option><option>RESPINS</option><option>Condiționat</option></select></div>
+            <div className="fgroup spanfull"><label>Defecte constatate</label><textarea value={f.defects} onChange={e=>s("defects",e.target.value)} /></div>
+            <div className="fgroup spanfull"><label>Acțiuni corective</label><textarea value={f.actions} onChange={e=>s("actions",e.target.value)} /></div>
+            <div className="fgroup spanfull"><label>Condiții tehnice exploatare</label><select value={f.technical_conditions} onChange={e=>s("technical_conditions",e.target.value)}><option>Corespunzătoare</option><option>Necorespunzătoare</option><option>Parțial corespunzătoare</option></select></div>
+          </div>}
+
+          {tab==="semnaturi" && <div>
+            <div style={{background:COLORS.successLight,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:COLORS.success}}>
+              ✓ Semnătura clientului a fost preluată automat din contract. Puteți adăuga semnătura tehnicianului mai jos.
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+              <div>
+                <label style={{display:"block",marginBottom:8,fontSize:12,fontWeight:600,color:COLORS.gray600}}>Semnătură client (din contract)</label>
+                {f.client_sig
+                  ? <div style={{border:`2px solid ${COLORS.success}`,borderRadius:10,padding:8,background:COLORS.successLight}}>
+                      <img src={f.client_sig} style={{width:"100%",height:100,objectFit:"contain"}} alt="Semnătură client" />
+                      <p style={{fontSize:11,color:COLORS.success,marginTop:4}}>✓ Semnătură preluată din contract</p>
+                    </div>
+                  : <SigPad label="" value={f.client_sig} onChange={v=>s("client_sig",v)} />
+                }
+              </div>
+              <SigPad label="Semnătură tehnician" value={f.technician_sig} onChange={v=>s("technician_sig",v)} />
+            </div>
+          </div>}
+        </div>
+
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>Anulare</button>
+          <button className="btn btn-ghost" onClick={()=>setPreview(true)}><Ic n="eye" s={14}/> Previzualizare</button>
+          <button className="btn btn-primary" onClick={()=>onSave(f)}>
+            <Ic n="check" s={14}/> Salvare raport {type}
           </button>
         </div>
       </div>
@@ -1475,7 +1694,7 @@ export default function App() {
             {page==="dashboard"&&<Dashboard clients={clients} jobs={jobs} reports={reports}/>}
             {page==="clients"&&<Clients clients={clients} setClients={setClients} jobs={jobs} userRole={role}/>}
             {page==="jobs"&&<Jobs clients={clients} jobs={jobs} setJobs={setJobs} reports={reports} setReports={setReports} userRole={role}/>}
-            {page==="contracts"&&<Contracts clients={clients} contracts={contracts} setContracts={setContracts}/>}
+            {page==="contracts"&&<Contracts clients={clients} contracts={contracts} setContracts={setContracts} reports={reports} setReports={setReports}/>}
             {page==="reports"&&<Reports reports={reports} clients={clients}/>}
           </div>
         </div>
