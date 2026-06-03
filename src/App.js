@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 
 const COLORS = {
-  primary: "#1B4F8A", primaryDark: "#0D3060", primaryLight: "#E8F0FA",
+  primary: "#E8501A", primaryDark: "#B83C10", primaryLight: "#FDF0EB",
   accent: "#E8501A", success: "#2A7D4F", successLight: "#E8F5EE",
   warning: "#B87514", warningLight: "#FBF4E6",
   danger: "#C0392B", dangerLight: "#FDECEA",
@@ -250,7 +250,7 @@ function SigPad({ value, onChange, label }) {
     if (!drawing.current) return; e.preventDefault();
     const ctx = ref.current.getContext("2d"), pos = getPos(e);
     ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(pos.x, pos.y);
-    ctx.strokeStyle = "#1B4F8A"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke();
+    ctx.strokeStyle = "#E8501A"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke();
     last.current = pos;
   };
   const end = () => { if (!drawing.current) return; drawing.current = false; onChange(ref.current.toDataURL()); };
