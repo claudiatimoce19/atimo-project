@@ -945,7 +945,7 @@ function Jobs({ clients, jobs, setJobs, reports, setReports, userRole }) {
       <div className="card">
         <div className="tbl-wrap">
           <table>
-            <thead><tr><th>Client</th><th>Tip serviciu</th><th>Data</th><th>Tehnician</th><th>Status</th><th>Preț</th><th>Acțiuni</th></tr></thead>
+            <thead><tr><th>Client</th><th>Tip serviciu</th><th>Data / Ora</th><th>Tehnician</th><th>Status</th><th>Preț</th><th>Acțiuni</th></tr></thead>
             <tbody>
               {filtered.length === 0 ? <tr><td colSpan={7}><div className="empty">Nicio lucrare găsită</div></td></tr>
                 : filtered.map(j => {
@@ -954,7 +954,10 @@ function Jobs({ clients, jobs, setJobs, reports, setReports, userRole }) {
                       <tr key={j.id}>
                         <td><div style={{fontWeight:500}}>{cl?.last_name} {cl?.first_name}</div><div style={{fontSize:12,color:COLORS.gray400}}>{cl?.city}</div></td>
                         <td style={{fontSize:13}}>{j.service_type}</td>
-                        <td>{fmtApp(j.date)}</td>
+                        <td>
+                          <div>{fmtApp(j.date)}</div>
+                          {j.visit_time && <div style={{fontSize:12,fontWeight:600,color:COLORS.primary}}>🕐 {j.visit_time}</div>}
+                        </td>
                         <td>{j.technician||"-"}</td>
                         <td>
                           <select value={j.status} onChange={e=>updateStatus(j.id,e.target.value)} style={{padding:"4px 8px",border:`1px solid ${COLORS.gray200}`,borderRadius:6,fontSize:12}}>
@@ -1004,7 +1007,7 @@ function Jobs({ clients, jobs, setJobs, reports, setReports, userRole }) {
 }
 
 function JobModal({ job, clients, loading, onSave, onClose }) {
-  const blank = {client_id:"",service_type:"",date:today(),technician:"",price:"",observations:""};
+  const blank = {client_id:"",service_type:"",date:today(),visit_time:"",technician:"",price:"",observations:""};
   const [f,setF] = useState(job?{...job}:blank);
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   return (
@@ -1025,10 +1028,11 @@ function JobModal({ job, clients, loading, onSave, onClose }) {
                 {SERVICE_TYPES.map(st=><option key={st}>{st}</option>)}
               </select>
             </div>
-            <div className="fgroup"><label>Data *</label><input type="date" value={f.date} onChange={e=>s("date",e.target.value)} /></div>
-            <div className="fgroup"><label>Tehnician</label><input value={f.technician} onChange={e=>s("technician",e.target.value)} /></div>
-            <div className="fgroup"><label>Preț (RON)</label><input type="number" value={f.price} onChange={e=>s("price",e.target.value)} /></div>
-            <div className="fgroup spanfull"><label>Observații</label><textarea value={f.observations} onChange={e=>s("observations",e.target.value)} /></div>
+            <div className="fgroup"><label>Data vizită *</label><input type="date" value={f.date} onChange={e=>s("date",e.target.value)} /></div>
+            <div className="fgroup"><label>Ora vizită</label><input type="time" value={f.visit_time||""} onChange={e=>s("visit_time",e.target.value)} /></div>
+            <div className="fgroup"><label>Tehnician</label><input value={f.technician||""} onChange={e=>s("technician",e.target.value)} placeholder="ex: Florin Popescu" /></div>
+            <div className="fgroup"><label>Preț (RON)</label><input type="number" value={f.price||""} onChange={e=>s("price",e.target.value)} /></div>
+            <div className="fgroup spanfull"><label>Observații / Instrucțiuni pentru tehnician</label><textarea value={f.observations||""} onChange={e=>s("observations",e.target.value)} placeholder="ex: Sună înainte cu 30 min, etaj 3 fără lift..." /></div>
           </div>
         </div>
         <div className="modal-foot">
@@ -1585,20 +1589,47 @@ function Login({ onLogin }) {
 }
 
 // ─── TECHNICIAN VIEW ─────────────────────────────────────────────────────────
-// Interfață simplificată pentru tehnicieni - doar lucrările alocate lor
 
 function TechnicianView({ user, userMeta, clients, jobs, setJobs, reports, setReports, logout }) {
   const [viuModal, setViuModal] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [viewMode, setViewMode] = useState("azi"); // "azi" | "saptamana" | "viitor" | "toate"
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = săptămâna curentă, 1 = săptămâna viitoare etc.
 
-  // Tehnicianul vede doar lucrările alocate lui
-  const myJobs = jobs.filter(j =>
-    j.technician && j.technician.toLowerCase().includes((userMeta?.name||"").toLowerCase().split(" ")[0].toLowerCase())
-    || j.technician === user.email
-  );
+  const techName = (userMeta?.name||"").toLowerCase();
+  const myJobs = jobs.filter(j => {
+    if (!j.technician) return false;
+    const jt = j.technician.toLowerCase();
+    return techName.split(" ").some(part => part.length > 2 && jt.includes(part));
+  });
+  const allJobs = myJobs.length > 0 ? myJobs : jobs;
 
-  // Dacă nu are lucrări alocate după nume, arată toate lucrările nefinalizate
-  const visibleJobs = myJobs.length > 0 ? myJobs : jobs.filter(j => j.status !== "Finalizat");
+  const getWeekRange = (offset) => {
+    const now = new Date();
+    const day = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
+    monday.setHours(0,0,0,0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23,59,59);
+    return { start: monday, end: sunday };
+  };
+
+  const getVisibleJobs = () => {
+    if (viewMode === "azi") {
+      return allJobs.filter(j => j.date === today())
+        .sort((a,b) => (a.visit_time||"99:99").localeCompare(b.visit_time||"99:99"));
+    }
+    if (viewMode === "saptamana" || viewMode === "viitor") {
+      const { start, end } = getWeekRange(viewMode === "viitor" ? weekOffset : 0);
+      return allJobs.filter(j => { const d = new Date(j.date); return d >= start && d <= end; })
+        .sort((a,b) => a.date.localeCompare(b.date) || (a.visit_time||"99:99").localeCompare(b.visit_time||"99:99"));
+    }
+    return allJobs.sort((a,b) => a.date.localeCompare(b.date) || (a.visit_time||"99:99").localeCompare(b.visit_time||"99:99"));
+  };
+
+  const visibleJobs = getVisibleJobs();
 
   const updateStatus = async (id, status) => {
     await supabase.from("jobs").update({status}).eq("id", id);
@@ -1626,10 +1657,43 @@ function TechnicianView({ user, userMeta, clients, jobs, setJobs, reports, setRe
     if (error) { alert("Eroare: " + error.message); return; }
     if (data) {
       setReports(p => [...p, data]);
-      // Marchează lucrarea ca finalizată
       if (r.job_id) updateStatus(r.job_id, "Finalizat");
     }
     setViuModal(null);
+  };
+
+  const groupByDate = (jobsList) => {
+    const groups = {};
+    jobsList.forEach(j => {
+      if (!groups[j.date]) groups[j.date] = [];
+      groups[j.date].push(j);
+    });
+    return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b));
+  };
+
+  const todayCount = allJobs.filter(j => j.date === today() && j.status !== "Finalizat").length;
+  const weekRange = getWeekRange(0);
+  const weekCount = allJobs.filter(j => { const d = new Date(j.date); return d >= weekRange.start && d <= weekRange.end; }).length;
+
+  const dayNames = ["Dum","Lun","Mar","Mie","Joi","Vin","Sâm"];
+  const monthNames = ["ian","feb","mar","apr","mai","iun","iul","aug","sep","oct","nov","dec"];
+
+  const fmtDateLong = (dateStr) => {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    return `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}, ${dayNames[d.getDay()]}`;
+  };
+
+  const fmtWeekRange = (offset) => {
+    const { start, end } = getWeekRange(offset);
+    return `${start.getDate()} ${monthNames[start.getMonth()]} – ${end.getDate()} ${monthNames[end.getMonth()]}`;
+  };
+
+  const getPageTitle = () => {
+    if (viewMode === "azi") return `Azi — ${fmtDateLong(today())}`;
+    if (viewMode === "saptamana") return `Săptămâna aceasta (${fmtWeekRange(0)})`;
+    if (viewMode === "viitor") return `Vizite ${fmtWeekRange(weekOffset)}`;
+    return "Toate vizitele";
   };
 
   return (
@@ -1647,10 +1711,21 @@ function TechnicianView({ user, userMeta, clients, jobs, setJobs, reports, setRe
             <div className="logo-sub">Tehnician teren</div>
           </div>
           <div className="nav">
-            <div className="nav-label">Lucrările mele</div>
-            <div style={{padding:"8px 20px",fontSize:13,color:"rgba(255,255,255,0.5)"}}>
-              {visibleJobs.filter(j=>j.status!=="Finalizat").length} lucrări active
-            </div>
+            <div className="nav-label">Vizite programate</div>
+            <button className={`nav-btn ${viewMode==="azi"?"active":""}`} onClick={()=>{setViewMode("azi");setSidebarOpen(false);}}>
+              <Ic n="cal" s={17}/> Azi
+              {todayCount > 0 && <span className="nav-badge">{todayCount}</span>}
+            </button>
+            <button className={`nav-btn ${viewMode==="saptamana"?"active":""}`} onClick={()=>{setViewMode("saptamana");setSidebarOpen(false);}}>
+              <Ic n="cal" s={17}/> Săptămâna aceasta
+              {weekCount > 0 && <span className="nav-badge">{weekCount}</span>}
+            </button>
+            <button className={`nav-btn ${viewMode==="viitor"?"active":""}`} onClick={()=>{setViewMode("viitor");setWeekOffset(1);setSidebarOpen(false);}}>
+              <Ic n="cal" s={17}/> Vizite viitoare
+            </button>
+            <button className={`nav-btn ${viewMode==="toate"?"active":""}`} onClick={()=>{setViewMode("toate");setSidebarOpen(false);}}>
+              <Ic n="briefcase" s={17}/> Toate vizitele
+            </button>
           </div>
           <div className="sidebar-user">
             <div className="user-name">{userMeta?.name||user.email}</div>
@@ -1662,111 +1737,355 @@ function TechnicianView({ user, userMeta, clients, jobs, setJobs, reports, setRe
         <div className="main">
           <div className="topbar">
             <button className="btn-icon" onClick={()=>setSidebarOpen(!sidebarOpen)} style={{marginRight:4}}><Ic n="menu"/></button>
-            <div className="topbar-title">Lucrările mele</div>
+            <div className="topbar-title" style={{fontSize:14}}>{getPageTitle()}</div>
             <div style={{width:34,height:34,borderRadius:"50%",background:COLORS.primaryLight,color:COLORS.primary,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13}}>
               {(userMeta?.name||user.email).slice(0,2).toUpperCase()}
             </div>
           </div>
 
           <div className="page">
-            {/* Statistici rapide */}
-            <div className="stat-grid" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
+            {/* Statistici */}
+            <div className="stat-grid" style={{gridTemplateColumns:"repeat(3,1fr)",marginBottom:16}}>
               <div className="stat accent-stat">
-                <div className="stat-label">Total lucrări</div>
-                <div className="stat-val">{visibleJobs.length}</div>
+                <div className="stat-label">Azi</div>
+                <div className="stat-val">{todayCount}</div>
+                <div className="stat-sub">vizite</div>
               </div>
               <div className="stat">
-                <div className="stat-label">Active</div>
-                <div className="stat-val" style={{color:COLORS.warning}}>{visibleJobs.filter(j=>j.status==="In progres"||j.status==="Programat").length}</div>
+                <div className="stat-label">Săptămâna</div>
+                <div className="stat-val">{weekCount}</div>
+                <div className="stat-sub">programate</div>
               </div>
               <div className="stat">
-                <div className="stat-label">Finalizate</div>
-                <div className="stat-val" style={{color:COLORS.success}}>{visibleJobs.filter(j=>j.status==="Finalizat").length}</div>
+                <div className="stat-label">Total active</div>
+                <div className="stat-val">{allJobs.filter(j=>j.status!=="Finalizat"&&j.status!=="Anulat").length}</div>
+                <div className="stat-sub">nefinalizate</div>
               </div>
             </div>
 
-            {/* Lista lucrări */}
-            {visibleJobs.length === 0 ? (
-              <div className="empty" style={{marginTop:40}}>
-                <div style={{fontSize:40,marginBottom:12}}>✓</div>
-                <div style={{fontWeight:600,fontSize:16}}>Nicio lucrare alocată</div>
-                <div style={{fontSize:14,color:COLORS.gray400,marginTop:4}}>Contactați administratorul pentru alocare lucrări</div>
-              </div>
-            ) : visibleJobs.map(j => {
-              const cl = clients.find(c=>c.id===j.client_id);
-              const jobReports = reports.filter(r=>r.job_id===j.id);
-              const isViu = j.service_type?.includes("ViU");
-              const isRiu = j.service_type?.includes("RiU");
-              return (
-                <div key={j.id} className="card" style={{marginBottom:12}}>
-                  <div style={{padding:"16px 20px"}}>
-                    {/* Header lucrare */}
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-                      <div>
-                        <div style={{fontWeight:600,fontSize:16}}>{cl?.last_name} {cl?.first_name}</div>
-                        <div style={{fontSize:13,color:COLORS.gray400,marginTop:2}}>{cl?.address}, {cl?.city}</div>
-                        <div style={{fontSize:13,color:COLORS.gray600,marginTop:4}}>{j.service_type}</div>
-                      </div>
-                      <div style={{textAlign:"right"}}>
-                        <span className={`badge ${j.status==="Finalizat"?"b-green":j.status==="In progres"?"b-orange":"b-blue"}`}>{j.status}</span>
-                        <div style={{fontSize:12,color:COLORS.gray400,marginTop:4}}>{fmtApp(j.date)}</div>
-                      </div>
-                    </div>
-
-                    {/* Date client */}
-                    <div style={{background:COLORS.gray50,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13}}>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                        <div><span style={{color:COLORS.gray400}}>Telefon: </span><strong>{cl?.phone}</strong></div>
-                        <div><span style={{color:COLORS.gray400}}>Cod abonat: </span><strong>{cl?.subscriber_code||"-"}</strong></div>
-                        <div><span style={{color:COLORS.gray400}}>Cod loc consum: </span><strong>{cl?.consumption_code||"-"}</strong></div>
-                        {j.observations && <div className="spanfull"><span style={{color:COLORS.gray400}}>Obs: </span>{j.observations}</div>}
-                      </div>
-                    </div>
-
-                    {/* Rapoarte existente */}
-                    {jobReports.length > 0 && (
-                      <div style={{marginBottom:12}}>
-                        {jobReports.map(r => (
-                          <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:COLORS.successLight,borderRadius:8,marginBottom:4}}>
-                            <div style={{fontSize:13}}>
-                              <span className={`badge ${r.type==="ViU"?"b-blue":"b-orange"}`}>{r.type}</span>
-                              <span style={{marginLeft:8,fontFamily:"monospace",fontSize:12}}>{r.number}</span>
-                              <span style={{marginLeft:8,color:COLORS.success}}>✓ {r.conclusion}</span>
-                            </div>
-                            <ReportPrintButton r={r} client={cl} />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Acțiuni */}
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      {(isViu||isRiu) && j.status !== "Finalizat" && (
-                        <button className="btn btn-primary" onClick={()=>setViuModal(j)}>
-                          <Ic n="filetxt" s={15}/> Completează {isRiu?"RiU":"ViU"}
-                        </button>
-                      )}
-                      {j.status === "Programat" && (
-                        <button className="btn btn-ghost" onClick={()=>updateStatus(j.id,"In progres")}>
-                          ▶ Începe lucrarea
-                        </button>
-                      )}
-                      {j.status === "In progres" && jobReports.length > 0 && (
-                        <button className="btn btn-success" style={{background:COLORS.success,color:"#fff"}} onClick={()=>updateStatus(j.id,"Finalizat")}>
-                          ✓ Marchează finalizat
-                        </button>
-                      )}
-                    </div>
-                  </div>
+            {/* Navigare săptămână pentru modul viitor */}
+            {viewMode === "viitor" && (
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fff",borderRadius:10,padding:"10px 16px",marginBottom:16,border:`1px solid ${COLORS.gray100}`}}>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setWeekOffset(p=>Math.max(1,p-1))}>
+                  ← Săptămâna anterioară
+                </button>
+                <div style={{fontWeight:600,fontSize:14,color:COLORS.primary}}>
+                  {fmtWeekRange(weekOffset)}
                 </div>
-              );
-            })}
+                <button className="btn btn-ghost btn-sm" onClick={()=>setWeekOffset(p=>p+1)}>
+                  Săptămâna viitoare →
+                </button>
+              </div>
+            )}
+
+            {/* Lista vizite */}
+            {visibleJobs.length === 0 ? (
+              <div className="empty" style={{marginTop:20}}>
+                <div style={{fontSize:48,marginBottom:12}}>📅</div>
+                <div style={{fontWeight:600,fontSize:16,marginBottom:4}}>
+                  {viewMode==="azi" ? "Nicio vizită programată azi" :
+                   viewMode==="viitor" ? `Nicio vizită programată pentru ${fmtWeekRange(weekOffset)}` :
+                   "Nicio vizită în această perioadă"}
+                </div>
+                <div style={{fontSize:14,color:COLORS.gray400}}>Administratorul va programa vizitele dvs.</div>
+              </div>
+            ) : (viewMode === "saptamana" || viewMode === "viitor" || viewMode === "toate") ? (
+              groupByDate(visibleJobs).map(([date, dayJobs]) => (
+                <div key={date} style={{marginBottom:20}}>
+                  <div style={{
+                    fontSize:13, fontWeight:700,
+                    color: date===today() ? COLORS.primary : new Date(date) < new Date(today()) ? COLORS.gray400 : COLORS.gray800,
+                    padding:"8px 0", marginBottom:8,
+                    borderBottom:`2px solid ${date===today()?COLORS.primary:COLORS.gray100}`,
+                    display:"flex", alignItems:"center", gap:8
+                  }}>
+                    {date===today() && <span style={{background:COLORS.primary,color:"#fff",borderRadius:4,padding:"1px 6px",fontSize:11}}>AZI</span>}
+                    {new Date(date) > new Date(today()) && <span style={{background:COLORS.successLight,color:COLORS.success,borderRadius:4,padding:"1px 6px",fontSize:11}}>VIITOR</span>}
+                    {new Date(date) < new Date(today()) && <span style={{background:COLORS.gray100,color:COLORS.gray400,borderRadius:4,padding:"1px 6px",fontSize:11}}>TRECUT</span>}
+                    {fmtDateLong(date)}
+                    <span style={{marginLeft:"auto",fontWeight:400,color:COLORS.gray400,fontSize:12}}>{dayJobs.length} vizite</span>
+                  </div>
+                  {dayJobs.map(j => <JobCard key={j.id} j={j} clients={clients} reports={reports} onViuOpen={setViuModal} onStatusChange={updateStatus} />)}
+                </div>
+              ))
+            ) : (
+              visibleJobs.map(j => <JobCard key={j.id} j={j} clients={clients} reports={reports} onViuOpen={setViuModal} onStatusChange={updateStatus} />)
+            )}
           </div>
         </div>
 
         {viuModal && <ViuModal job={viuModal} clients={clients} onSave={saveReport} onClose={()=>setViuModal(null)} />}
       </div>
     </>
+  );
+}
+
+  // Lucrările tehnicianului — filtrăm după numele lui
+  const techName = (userMeta?.name||"").toLowerCase();
+  const myJobs = jobs.filter(j => {
+    if (!j.technician) return false;
+    const jt = j.technician.toLowerCase();
+    // Potrivire după prenume sau nume complet
+    return techName.split(" ").some(part => part.length > 2 && jt.includes(part));
+  });
+  // Dacă nu are lucrări după nume, arată toate
+  const allJobs = myJobs.length > 0 ? myJobs : jobs;
+
+  // Filtrare după mod vizualizare
+  const getVisibleJobs = () => {
+    if (viewMode === "azi") return allJobs.filter(j => j.date === today()).sort((a,b) => (a.visit_time||"").localeCompare(b.visit_time||""));
+    if (viewMode === "saptamana") {
+      const start = new Date(); start.setHours(0,0,0,0);
+      const end = new Date(); end.setDate(end.getDate()+7); end.setHours(23,59,59);
+      return allJobs.filter(j => { const d = new Date(j.date); return d >= start && d <= end; })
+        .sort((a,b) => a.date.localeCompare(b.date) || (a.visit_time||"").localeCompare(b.visit_time||""));
+    }
+    return allJobs.sort((a,b) => b.date.localeCompare(a.date));
+  };
+  const visibleJobs = getVisibleJobs();
+
+  const updateStatus = async (id, status) => {
+    await supabase.from("jobs").update({status}).eq("id", id);
+    setJobs(p => p.map(j => j.id === id ? {...j, status} : j));
+  };
+
+  const saveReport = async (r) => {
+    const reportToSave = {
+      job_id: r.job_id, client_id: r.client_id, type: r.type, number: r.number, date: r.date,
+      consumption_address: r.consumption_address, contract_number: r.contract_number,
+      last_verification_date: r.last_verification_date || null, due_date: r.due_date || null,
+      inspection_type: r.inspection_type, installation_type: r.installation_type,
+      checklist: r.checklist || {}, checklist_obs: r.checklist_obs || {},
+      defects: r.defects, actions: r.actions, conclusion: r.conclusion,
+      technical_conditions: r.technical_conditions,
+      client_sig: r.client_sig || null, technician_sig: r.technician_sig || null,
+      meter_protocol_number: r.meter_protocol_number, meter_protocol_date: r.meter_protocol_date || null,
+      revision_reason: r.revision_reason,
+      pressure_resistance: r.pressure_resistance || null, pressure_tightness: r.pressure_tightness || null,
+      pressure_regime: r.pressure_regime || null,
+      installation_material: r.installation_material, installation_location: r.installation_location,
+      test_result: r.test_result,
+    };
+    const { data, error } = await supabase.from("reports").insert(reportToSave).select().single();
+    if (error) { alert("Eroare: " + error.message); return; }
+    if (data) {
+      setReports(p => [...p, data]);
+      if (r.job_id) updateStatus(r.job_id, "Finalizat");
+    }
+    setViuModal(null);
+  };
+
+  // Grupare lucrări pe zile pentru vizualizare săptămână
+  const groupByDate = (jobsList) => {
+    const groups = {};
+    jobsList.forEach(j => {
+      if (!groups[j.date]) groups[j.date] = [];
+      groups[j.date].push(j);
+    });
+    return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b));
+  };
+
+  const todayCount = allJobs.filter(j => j.date === today()).length;
+  const weekCount = allJobs.filter(j => { const d = new Date(j.date); const now = new Date(); const end = new Date(); end.setDate(end.getDate()+7); return d >= now && d <= end; }).length;
+  const activeCount = allJobs.filter(j => j.status !== "Finalizat" && j.status !== "Anulat").length;
+
+  const dayNames = ["Dum","Lun","Mar","Mie","Joi","Vin","Sâm"];
+  const monthNames = ["ianuarie","februarie","martie","aprilie","mai","iunie","iulie","august","septembrie","octombrie","noiembrie","decembrie"];
+
+  const fmtDateLong = (dateStr) => {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    return `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}, ${dayNames[d.getDay()]}`;
+  };
+
+  return (
+    <>
+      <style>{styles}</style>
+      <div className="app">
+        {sidebarOpen && <div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:499}}/>}
+
+        <div className={`sidebar ${sidebarOpen?"open":""}`}>
+          <div className="sidebar-logo">
+            <div style={{width:36,height:36,background:"rgba(255,255,255,0.15)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:10}}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            </div>
+            <div className="logo-name">ATIMO PROJECT</div>
+            <div className="logo-sub">Tehnician teren</div>
+          </div>
+          <div className="nav">
+            <div className="nav-label">Vizite</div>
+            <button className={`nav-btn ${viewMode==="azi"?"active":""}`} onClick={()=>{setViewMode("azi");setSidebarOpen(false);}}>
+              <Ic n="cal" s={17}/> Azi
+              {todayCount > 0 && <span className="nav-badge">{todayCount}</span>}
+            </button>
+            <button className={`nav-btn ${viewMode==="saptamana"?"active":""}`} onClick={()=>{setViewMode("saptamana");setSidebarOpen(false);}}>
+              <Ic n="cal" s={17}/> Săptămâna aceasta
+              {weekCount > 0 && <span className="nav-badge">{weekCount}</span>}
+            </button>
+            <button className={`nav-btn ${viewMode==="toate"?"active":""}`} onClick={()=>{setViewMode("toate");setSidebarOpen(false);}}>
+              <Ic n="briefcase" s={17}/> Toate vizitele
+            </button>
+          </div>
+          <div className="sidebar-user">
+            <div className="user-name">{userMeta?.name||user.email}</div>
+            <div className="user-role">Tehnician</div>
+            <button className="logout-btn" onClick={logout}><Ic n="logout" s={14}/> Deconectare</button>
+          </div>
+        </div>
+
+        <div className="main">
+          <div className="topbar">
+            <button className="btn-icon" onClick={()=>setSidebarOpen(!sidebarOpen)} style={{marginRight:4}}><Ic n="menu"/></button>
+            <div className="topbar-title">
+              {viewMode==="azi" ? `Vizite azi — ${fmtDateLong(today())}` : viewMode==="saptamana" ? "Vizite săptămâna aceasta" : "Toate vizitele"}
+            </div>
+            <div style={{width:34,height:34,borderRadius:"50%",background:COLORS.primaryLight,color:COLORS.primary,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13}}>
+              {(userMeta?.name||user.email).slice(0,2).toUpperCase()}
+            </div>
+          </div>
+
+          <div className="page">
+            {/* Statistici */}
+            <div className="stat-grid" style={{gridTemplateColumns:"repeat(3,1fr)",marginBottom:20}}>
+              <div className="stat accent-stat">
+                <div className="stat-label">Vizite azi</div>
+                <div className="stat-val">{todayCount}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Această săptămână</div>
+                <div className="stat-val" style={{color:COLORS.warning}}>{weekCount}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Active total</div>
+                <div className="stat-val" style={{color:COLORS.success}}>{activeCount}</div>
+              </div>
+            </div>
+
+            {/* Conținut */}
+            {visibleJobs.length === 0 ? (
+              <div className="empty" style={{marginTop:20}}>
+                <div style={{fontSize:48,marginBottom:12}}>📅</div>
+                <div style={{fontWeight:600,fontSize:16,marginBottom:4}}>
+                  {viewMode==="azi" ? "Nicio vizită programată azi" : "Nicio vizită în această perioadă"}
+                </div>
+                <div style={{fontSize:14,color:COLORS.gray400}}>Administratorul va programa vizitele dvs.</div>
+              </div>
+            ) : viewMode === "saptamana" ? (
+              // Vizualizare grupată pe zile
+              groupByDate(visibleJobs).map(([date, dayJobs]) => (
+                <div key={date} style={{marginBottom:20}}>
+                  <div style={{
+                    fontSize:13, fontWeight:700, color: date===today() ? COLORS.primary : COLORS.gray600,
+                    padding:"8px 0", marginBottom:8, borderBottom:`2px solid ${date===today()?COLORS.primary:COLORS.gray100}`,
+                    display:"flex", alignItems:"center", gap:8
+                  }}>
+                    {date===today() && <span style={{background:COLORS.primary,color:"#fff",borderRadius:4,padding:"1px 6px",fontSize:11}}>AZI</span>}
+                    {fmtDateLong(date)}
+                    <span style={{marginLeft:"auto",fontWeight:400,color:COLORS.gray400,fontSize:12}}>{dayJobs.length} vizite</span>
+                  </div>
+                  {dayJobs.map(j => <JobCard key={j.id} j={j} clients={clients} reports={reports} onViuOpen={setViuModal} onStatusChange={updateStatus} />)}
+                </div>
+              ))
+            ) : (
+              visibleJobs.map(j => <JobCard key={j.id} j={j} clients={clients} reports={reports} onViuOpen={setViuModal} onStatusChange={updateStatus} />)
+            )}
+          </div>
+        </div>
+
+        {viuModal && <ViuModal job={viuModal} clients={clients} onSave={saveReport} onClose={()=>setViuModal(null)} />}
+      </div>
+    </>
+  );
+}
+
+// Card vizită pentru tehnician
+function JobCard({ j, clients, reports, onViuOpen, onStatusChange }) {
+  const cl = clients.find(c=>c.id===j.client_id);
+  const jobReports = reports.filter(r=>r.job_id===j.id);
+  const isViu = j.service_type?.includes("ViU");
+  const isRiu = j.service_type?.includes("RiU");
+  const isFinalizat = j.status === "Finalizat";
+
+  return (
+    <div className="card" style={{marginBottom:12,borderLeft:`4px solid ${isFinalizat?COLORS.success:j.visit_time?COLORS.primary:COLORS.gray200}`}}>
+      <div style={{padding:"14px 18px"}}>
+        {/* Ora + status */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            {j.visit_time ? (
+              <div style={{background:COLORS.primary,color:"#fff",borderRadius:8,padding:"4px 12px",fontWeight:700,fontSize:16,minWidth:70,textAlign:"center"}}>
+                {j.visit_time}
+              </div>
+            ) : (
+              <div style={{background:COLORS.gray100,color:COLORS.gray400,borderRadius:8,padding:"4px 12px",fontSize:13}}>
+                Oră nesetată
+              </div>
+            )}
+            <div>
+              <div style={{fontWeight:600,fontSize:15}}>{cl?.last_name} {cl?.first_name}</div>
+              <div style={{fontSize:12,color:COLORS.gray400}}>{j.service_type}</div>
+            </div>
+          </div>
+          <span className={`badge ${isFinalizat?"b-green":j.status==="In progres"?"b-orange":"b-blue"}`}>{j.status}</span>
+        </div>
+
+        {/* Adresă + telefon */}
+        <div style={{background:COLORS.gray50,borderRadius:8,padding:"10px 12px",marginBottom:10,fontSize:13}}>
+          <div style={{marginBottom:4}}>
+            📍 <strong>{cl?.address}</strong>{cl?.city ? `, ${cl.city}` : ""}
+          </div>
+          <div style={{display:"flex",gap:16}}>
+            {cl?.phone && <span>📞 <a href={`tel:${cl.phone}`} style={{color:COLORS.primary,fontWeight:600}}>{cl.phone}</a></span>}
+            {cl?.subscriber_code && <span style={{color:COLORS.gray400}}>Cod abonat: <strong style={{color:COLORS.gray800}}>{cl.subscriber_code}</strong></span>}
+          </div>
+          {j.observations && (
+            <div style={{marginTop:6,padding:"6px 10px",background:"#fff",borderRadius:6,border:`1px solid ${COLORS.gray200}`,fontSize:12,color:COLORS.gray600}}>
+              💬 {j.observations}
+            </div>
+          )}
+        </div>
+
+        {/* Rapoarte existente */}
+        {jobReports.length > 0 && (
+          <div style={{marginBottom:10}}>
+            {jobReports.map(r => (
+              <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 10px",background:COLORS.successLight,borderRadius:8,marginBottom:4}}>
+                <div style={{fontSize:13,display:"flex",alignItems:"center",gap:8}}>
+                  <span className={`badge ${r.type==="ViU"?"b-blue":"b-orange"}`}>{r.type}</span>
+                  <span style={{fontFamily:"monospace",fontSize:12}}>{r.number}</span>
+                  <span style={{color:COLORS.success,fontWeight:600}}>✓ {r.conclusion}</span>
+                </div>
+                <ReportPrintButton r={r} client={cl} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Butoane acțiuni */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {!isFinalizat && (isViu||isRiu) && (
+            <button className="btn btn-primary" onClick={()=>onViuOpen(j)}>
+              <Ic n="filetxt" s={15}/> Completează {isRiu?"RiU":"ViU"}
+            </button>
+          )}
+          {j.status==="Programat" && (
+            <button className="btn btn-ghost" onClick={()=>onStatusChange(j.id,"In progres")}>
+              ▶ Începe vizita
+            </button>
+          )}
+          {j.status==="In progres" && jobReports.length > 0 && (
+            <button className="btn" style={{background:COLORS.success,color:"#fff"}} onClick={()=>onStatusChange(j.id,"Finalizat")}>
+              ✓ Finalizat
+            </button>
+          )}
+          {isFinalizat && (
+            <div style={{fontSize:13,color:COLORS.success,display:"flex",alignItems:"center",gap:4}}>
+              ✓ Vizită finalizată
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
