@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 
 const COLORS = {
-  primary: "#E8501A", primaryDark: "#B83C10", primaryLight: "#FDF0EB",
+  primary: "#1B4F8A", primaryDark: "#0D3060", primaryLight: "#E8F0FA",
   accent: "#E8501A", success: "#2A7D4F", successLight: "#E8F5EE",
   warning: "#B87514", warningLight: "#FBF4E6",
   danger: "#C0392B", dangerLight: "#FDECEA",
@@ -250,7 +250,7 @@ function SigPad({ value, onChange, label }) {
     if (!drawing.current) return; e.preventDefault();
     const ctx = ref.current.getContext("2d"), pos = getPos(e);
     ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(pos.x, pos.y);
-    ctx.strokeStyle = "#E8501A"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke();
+    ctx.strokeStyle = "#1B4F8A"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke();
     last.current = pos;
   };
   const end = () => { if (!drawing.current) return; drawing.current = false; onChange(ref.current.toDataURL()); };
@@ -1584,6 +1584,215 @@ function Login({ onLogin }) {
   );
 }
 
+// ─── TECHNICIAN VIEW ─────────────────────────────────────────────────────────
+// Interfață simplificată pentru tehnicieni - doar lucrările alocate lor
+
+function TechnicianView({ user, userMeta, clients, jobs, setJobs, reports, setReports, logout }) {
+  const [viuModal, setViuModal] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Tehnicianul vede doar lucrările alocate lui
+  const myJobs = jobs.filter(j =>
+    j.technician && j.technician.toLowerCase().includes((userMeta?.name||"").toLowerCase().split(" ")[0].toLowerCase())
+    || j.technician === user.email
+  );
+
+  // Dacă nu are lucrări alocate după nume, arată toate lucrările nefinalizate
+  const visibleJobs = myJobs.length > 0 ? myJobs : jobs.filter(j => j.status !== "Finalizat");
+
+  const updateStatus = async (id, status) => {
+    await supabase.from("jobs").update({status}).eq("id", id);
+    setJobs(p => p.map(j => j.id === id ? {...j, status} : j));
+  };
+
+  const saveReport = async (r) => {
+    const reportToSave = {
+      job_id: r.job_id, client_id: r.client_id, type: r.type, number: r.number, date: r.date,
+      consumption_address: r.consumption_address, contract_number: r.contract_number,
+      last_verification_date: r.last_verification_date || null, due_date: r.due_date || null,
+      inspection_type: r.inspection_type, installation_type: r.installation_type,
+      checklist: r.checklist || {}, checklist_obs: r.checklist_obs || {},
+      defects: r.defects, actions: r.actions, conclusion: r.conclusion,
+      technical_conditions: r.technical_conditions,
+      client_sig: r.client_sig || null, technician_sig: r.technician_sig || null,
+      meter_protocol_number: r.meter_protocol_number, meter_protocol_date: r.meter_protocol_date || null,
+      revision_reason: r.revision_reason,
+      pressure_resistance: r.pressure_resistance || null, pressure_tightness: r.pressure_tightness || null,
+      pressure_regime: r.pressure_regime || null,
+      installation_material: r.installation_material, installation_location: r.installation_location,
+      test_result: r.test_result,
+    };
+    const { data, error } = await supabase.from("reports").insert(reportToSave).select().single();
+    if (error) { alert("Eroare: " + error.message); return; }
+    if (data) {
+      setReports(p => [...p, data]);
+      // Marchează lucrarea ca finalizată
+      if (r.job_id) updateStatus(r.job_id, "Finalizat");
+    }
+    setViuModal(null);
+  };
+
+  return (
+    <>
+      <style>{styles}</style>
+      <div className="app">
+        {sidebarOpen && <div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:499}}/>}
+
+        <div className={`sidebar ${sidebarOpen?"open":""}`}>
+          <div className="sidebar-logo">
+            <div style={{width:36,height:36,background:"rgba(255,255,255,0.15)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:10}}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            </div>
+            <div className="logo-name">ATIMO PROJECT</div>
+            <div className="logo-sub">Tehnician teren</div>
+          </div>
+          <div className="nav">
+            <div className="nav-label">Lucrările mele</div>
+            <div style={{padding:"8px 20px",fontSize:13,color:"rgba(255,255,255,0.5)"}}>
+              {visibleJobs.filter(j=>j.status!=="Finalizat").length} lucrări active
+            </div>
+          </div>
+          <div className="sidebar-user">
+            <div className="user-name">{userMeta?.name||user.email}</div>
+            <div className="user-role">Tehnician</div>
+            <button className="logout-btn" onClick={logout}><Ic n="logout" s={14}/> Deconectare</button>
+          </div>
+        </div>
+
+        <div className="main">
+          <div className="topbar">
+            <button className="btn-icon" onClick={()=>setSidebarOpen(!sidebarOpen)} style={{marginRight:4}}><Ic n="menu"/></button>
+            <div className="topbar-title">Lucrările mele</div>
+            <div style={{width:34,height:34,borderRadius:"50%",background:COLORS.primaryLight,color:COLORS.primary,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13}}>
+              {(userMeta?.name||user.email).slice(0,2).toUpperCase()}
+            </div>
+          </div>
+
+          <div className="page">
+            {/* Statistici rapide */}
+            <div className="stat-grid" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
+              <div className="stat accent-stat">
+                <div className="stat-label">Total lucrări</div>
+                <div className="stat-val">{visibleJobs.length}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Active</div>
+                <div className="stat-val" style={{color:COLORS.warning}}>{visibleJobs.filter(j=>j.status==="In progres"||j.status==="Programat").length}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Finalizate</div>
+                <div className="stat-val" style={{color:COLORS.success}}>{visibleJobs.filter(j=>j.status==="Finalizat").length}</div>
+              </div>
+            </div>
+
+            {/* Lista lucrări */}
+            {visibleJobs.length === 0 ? (
+              <div className="empty" style={{marginTop:40}}>
+                <div style={{fontSize:40,marginBottom:12}}>✓</div>
+                <div style={{fontWeight:600,fontSize:16}}>Nicio lucrare alocată</div>
+                <div style={{fontSize:14,color:COLORS.gray400,marginTop:4}}>Contactați administratorul pentru alocare lucrări</div>
+              </div>
+            ) : visibleJobs.map(j => {
+              const cl = clients.find(c=>c.id===j.client_id);
+              const jobReports = reports.filter(r=>r.job_id===j.id);
+              const isViu = j.service_type?.includes("ViU");
+              const isRiu = j.service_type?.includes("RiU");
+              return (
+                <div key={j.id} className="card" style={{marginBottom:12}}>
+                  <div style={{padding:"16px 20px"}}>
+                    {/* Header lucrare */}
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                      <div>
+                        <div style={{fontWeight:600,fontSize:16}}>{cl?.last_name} {cl?.first_name}</div>
+                        <div style={{fontSize:13,color:COLORS.gray400,marginTop:2}}>{cl?.address}, {cl?.city}</div>
+                        <div style={{fontSize:13,color:COLORS.gray600,marginTop:4}}>{j.service_type}</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <span className={`badge ${j.status==="Finalizat"?"b-green":j.status==="In progres"?"b-orange":"b-blue"}`}>{j.status}</span>
+                        <div style={{fontSize:12,color:COLORS.gray400,marginTop:4}}>{fmtApp(j.date)}</div>
+                      </div>
+                    </div>
+
+                    {/* Date client */}
+                    <div style={{background:COLORS.gray50,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                        <div><span style={{color:COLORS.gray400}}>Telefon: </span><strong>{cl?.phone}</strong></div>
+                        <div><span style={{color:COLORS.gray400}}>Cod abonat: </span><strong>{cl?.subscriber_code||"-"}</strong></div>
+                        <div><span style={{color:COLORS.gray400}}>Cod loc consum: </span><strong>{cl?.consumption_code||"-"}</strong></div>
+                        {j.observations && <div className="spanfull"><span style={{color:COLORS.gray400}}>Obs: </span>{j.observations}</div>}
+                      </div>
+                    </div>
+
+                    {/* Rapoarte existente */}
+                    {jobReports.length > 0 && (
+                      <div style={{marginBottom:12}}>
+                        {jobReports.map(r => (
+                          <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:COLORS.successLight,borderRadius:8,marginBottom:4}}>
+                            <div style={{fontSize:13}}>
+                              <span className={`badge ${r.type==="ViU"?"b-blue":"b-orange"}`}>{r.type}</span>
+                              <span style={{marginLeft:8,fontFamily:"monospace",fontSize:12}}>{r.number}</span>
+                              <span style={{marginLeft:8,color:COLORS.success}}>✓ {r.conclusion}</span>
+                            </div>
+                            <ReportPrintButton r={r} client={cl} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Acțiuni */}
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {(isViu||isRiu) && j.status !== "Finalizat" && (
+                        <button className="btn btn-primary" onClick={()=>setViuModal(j)}>
+                          <Ic n="filetxt" s={15}/> Completează {isRiu?"RiU":"ViU"}
+                        </button>
+                      )}
+                      {j.status === "Programat" && (
+                        <button className="btn btn-ghost" onClick={()=>updateStatus(j.id,"In progres")}>
+                          ▶ Începe lucrarea
+                        </button>
+                      )}
+                      {j.status === "In progres" && jobReports.length > 0 && (
+                        <button className="btn btn-success" style={{background:COLORS.success,color:"#fff"}} onClick={()=>updateStatus(j.id,"Finalizat")}>
+                          ✓ Marchează finalizat
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {viuModal && <ViuModal job={viuModal} clients={clients} onSave={saveReport} onClose={()=>setViuModal(null)} />}
+      </div>
+    </>
+  );
+}
+
+// Buton print pentru tehnician
+function ReportPrintButton({ r, client }) {
+  const [show, setShow] = useState(false);
+  return (
+    <>
+      <button className="btn btn-sm btn-ghost" onClick={()=>setShow(true)}><Ic n="print" s={13}/> Tipărire</button>
+      {show && (
+        <div className="modal-bg">
+          <div className="modal modal-lg" style={{maxWidth:900}}>
+            <div className="modal-hdr">
+              <Ic n="filetxt"/><div className="modal-title">Raport {r.type} — {r.number}</div>
+              <button className="btn btn-sm btn-ghost no-print" style={{marginRight:4}} onClick={()=>window.print()}><Ic n="print" s={14}/> Tipărire</button>
+              <button className="btn-icon no-print" onClick={()=>setShow(false)}><Ic n="x"/></button>
+            </div>
+            <div className="modal-body" style={{padding:0}}><ViuPDF r={r} client={client}/></div>
+            <div className="modal-foot no-print"><button className="btn btn-ghost" onClick={()=>setShow(false)}>Închide</button></div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -1609,32 +1818,30 @@ export default function App() {
   useEffect(() => {
     if(!user) return;
     const load = async () => {
+      const {data:profile} = await supabase.from("profiles").select("role,name").eq("id",user.id).single();
+      if(profile) setUserMeta(profile);
+
+      const isTech = profile?.role === "technician";
       const [c,j,co,r] = await Promise.all([
         supabase.from("clients").select("*").order("created_at",{ascending:false}),
+        // Tehnicianul încarcă toate job-urile (filtrăm în UI după nume)
         supabase.from("jobs").select("*").order("date",{ascending:false}),
-        supabase.from("contracts").select("*").order("created_at",{ascending:false}),
+        isTech ? {data:[]} : supabase.from("contracts").select("*").order("created_at",{ascending:false}),
         supabase.from("reports").select("*").order("date",{ascending:false}),
       ]);
       if(c.data) setClients(c.data);
       if(j.data) setJobs(j.data);
       if(co.data) setContracts(co.data);
       if(r.data) setReports(r.data);
-      const {data:profile} = await supabase.from("profiles").select("role,name").eq("id",user.id).single();
-      if(profile) setUserMeta(profile);
     };
     load();
   }, [user]);
 
-  const logout = async () => { await supabase.auth.signOut(); setUser(null); setClients([]); setJobs([]); setContracts([]); setReports([]); };
-  const nav = [
-    {id:"dashboard",label:"Dashboard",icon:"dashboard"},
-    {id:"clients",label:"Clienți",icon:"users"},
-    {id:"jobs",label:"Lucrări",icon:"briefcase"},
-    {id:"contracts",label:"Contracte",icon:"doc"},
-    {id:"reports",label:"Rapoarte ViU/RiU",icon:"filetxt"},
-  ];
-  const titles = {dashboard:"Dashboard",clients:"Clienți",jobs:"Lucrări",contracts:"Contracte",reports:"Rapoarte ViU / RiU"};
-  const expiring = clients.filter(c=>{if(!c.next_viu_date)return false;const d=(new Date(c.next_viu_date)-new Date())/86400000;return d>=0&&d<=60;}).length;
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setUser(null); setUserMeta(null);
+    setClients([]); setJobs([]); setContracts([]); setReports([]);
+  };
 
   if(loading) return (
     <><style>{styles}</style>
@@ -1646,7 +1853,34 @@ export default function App() {
 
   if(!user) return (<><style>{styles}</style><Login onLogin={setUser}/></>);
 
-  const role = userMeta?.role || "office";
+  const role = userMeta?.role || "admin";
+
+  // ── INTERFAȚĂ TEHNICIAN ──
+  if(role === "technician") {
+    return (
+      <TechnicianView
+        user={user}
+        userMeta={userMeta}
+        clients={clients}
+        jobs={jobs}
+        setJobs={setJobs}
+        reports={reports}
+        setReports={setReports}
+        logout={logout}
+      />
+    );
+  }
+
+  // ── INTERFAȚĂ ADMIN ──
+  const nav = [
+    {id:"dashboard",label:"Dashboard",icon:"dashboard"},
+    {id:"clients",label:"Clienți",icon:"users"},
+    {id:"jobs",label:"Lucrări",icon:"briefcase"},
+    {id:"contracts",label:"Contracte",icon:"doc"},
+    {id:"reports",label:"Rapoarte ViU/RiU",icon:"filetxt"},
+  ];
+  const titles = {dashboard:"Dashboard",clients:"Clienți",jobs:"Lucrări",contracts:"Contracte",reports:"Rapoarte ViU / RiU"};
+  const expiring = clients.filter(c=>{if(!c.next_viu_date)return false;const d=(new Date(c.next_viu_date)-new Date())/86400000;return d>=0&&d<=60;}).length;
 
   return (
     <>
@@ -1672,7 +1906,7 @@ export default function App() {
           </div>
           <div className="sidebar-user">
             <div className="user-name">{userMeta?.name||user.email}</div>
-            <div className="user-role">{role==="admin"?"Administrator":role==="office"?"Birou":"Tehnician"}</div>
+            <div className="user-role">Administrator</div>
             <button className="logout-btn" onClick={logout}><Ic n="logout" s={14}/> Deconectare</button>
           </div>
         </div>
